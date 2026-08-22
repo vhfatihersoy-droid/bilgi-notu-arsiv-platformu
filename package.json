@@ -1,0 +1,29 @@
+{
+  "name": "bilgi-notu-arsiv-platformu",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "13.5.6",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "react-markdown": "8.0.7",
+    "@tiptap/react": "^2.0.0",
+    "@tiptap/starter-kit": "^2.0.0",
+    "@tiptap/extension-collaboration": "^2.0.0",
+    "@tiptap/extension-collaboration-cursor": "^2.0.0",
+    "yjs": "^13.5.25",
+    "y-websocket": "^1.4.5"
+  },
+  "devDependencies": {
+    "autoprefixer": "10.4.14",
+    "postcss": "8.4.24",
+    "tailwindcss": "3.4.6",
+    "typescript": "5.1.6"
+  }
+}
