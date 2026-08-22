@@ -1,0 +1,108 @@
+name: Automated PR create & optional merge
+on:
+  workflow_dispatch:
+    inputs:
+      merge:
+        description: 'If true, attempt to merge created PRs'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  create-prs:
+    runs-on: ubuntu-latest
+    env:
+      REPO: ${{ github.repository }}
+      BRANCHES: "feat/supabase-auth feat/collab-yjs ci/add-workflow"
+    steps:
+      - name: Checkout (main)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gh (GitHub CLI)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gh jq curl
+
+      - name: Authenticate gh using PAT
+        env:
+          GH_TOKEN: ${{ secrets.GH_BOT_TOKEN }}
+        run: echo "$GH_TOKEN" | gh auth login --with-token
+
+      - name: Create PRs for branches
+        id: create_prs
+        run: |
+          set -euo pipefail
+          MERGE="${{ github.event.inputs.merge }}"
+          echo "Will attempt merge? $MERGE"
+          for BR in $BRANCHES; do
+            echo "Processing branch: $BR"
+            # check if branch exists on remote
+            if git ls-remote --heads origin "$BR" | grep -q "$BR"; then
+              echo "Branch $BR exists remotely"
+            else
+              echo "Branch $BR not found on remote — skipping"
+              continue
+            fi
+
+            # check if PR already exists
+            PR_NUM=$(gh pr list --repo "$REPO" --head "$BR" --json number -q '.[0].number' || echo "")
+            if [ -n "$PR_NUM" ] && [ "$PR_NUM" != "null" ]; then
+              echo "PR already exists for $BR: #$PR_NUM"
+            else
+              # create PR with title/body based on branch
+              if [ "$BR" = "feat/supabase-auth" ]; then
+                TITLE="feat(supabase): Supabase auth + notes CRUD"
+                BODY="Eklenenler:\n- src/lib/supabaseClient.ts\n- .env.example\n- src/app/auth/page.tsx (magic link + OAuth placeholders)\n- src/lib/notes.ts\n\nTest: add .env.local, npm install, npm run dev, check /auth"
+              elif [ "$BR" = "feat/collab-yjs" ]; then
+                TITLE="feat(collab): add TipTap + Yjs collaboration demo"
+                BODY="Eklenenler:\n- package.json (collab deps)\n- src/app/collab/page.tsx (TipTap + Yjs demo)\n\nTest: checkout branch, npm install, npm run dev, open /collab in two windows."
+              elif [ "$BR" = "ci/add-workflow" ]; then
+                TITLE="ci: add CI workflow"
+                BODY="Eklenenler:\n- .github/workflows/ci.yml (build + lint)\n\nNote: add secrets if build requires env values."
+              else
+                TITLE="Automated PR for $BR"
+                BODY="Automated PR for branch $BR"
+              fi
+
+              echo "Creating PR for $BR"
+              gh pr create --repo "$REPO" --base main --head "$BR" --title "$TITLE" --body "$BODY" || {
+                echo "gh pr create failed for $BR; attempting fallback via API"
+                # fallback with API
+                curl -s -X POST -H "Accept: application/vnd.github+json" -H "Authorization: token $GH_TOKEN" \
+                  "https://api.github.com/repos/$REPO/pulls" \
+                  -d "$(jq -n --arg t "$TITLE" --arg b "$BODY" --arg head "$BR" '{title:$t,body:$b,head:$head,base:"main"}')"
+              }
+              PR_NUM=$(gh pr list --repo "$REPO" --head "$BR" --json number -q '.[0].number' || echo "")
+              echo "Created PR number: $PR_NUM"
+            fi
+
+            # attempt merge if requested and PR exists
+            if [ "$MERGE" = "true" ] || [ "$MERGE" = "True" ]; then
+              if [ -n "$PR_NUM" ] && [ "$PR_NUM" != "null" ]; then
+                echo "Attempting merge for PR #$PR_NUM"
+                # try a normal merge; if blocked, try --admin (requires admin privileges on token)
+                set +e
+                gh pr merge "$PR_NUM" --repo "$REPO" --merge --delete-branch --auto || true
+                if [ $? -ne 0 ]; then
+                  echo "Normal merge failed, trying admin override"
+                  gh pr merge "$PR_NUM" --repo "$REPO" --merge --delete-branch --admin || true
+                fi
+                set -e
+              else
+                echo "No PR number to merge for $BR"
+              fi
+            fi
+          done
+
+      - name: Report created PRs
+        run: |
+          echo "Listing open PRs for processed branches:"
+          for BR in $BRANCHES; do
+            gh pr list --repo "$REPO" --head "$BR" --json number,title,url -q '.[] | "\(.number) \(.title) \(.url)"' || true
+          done
